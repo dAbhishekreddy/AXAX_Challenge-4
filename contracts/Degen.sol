@@ -1,49 +1,75 @@
-// SPDX-License-Identifier: GPL-3.0
-pragma solidity >=0.5.0 <0.9.0;
+/*The given task is as follows:
+Minting new tokens: The platform should be able to create new tokens and distribute them to players as rewards. Only the owner can mint tokens.
+Transferring tokens: Players should be able to transfer their tokens to others.
+Redeeming tokens: Players should be able to redeem their tokens for items in the in-game store.
+Checking token balance: Players should be able to check their token balance at any time.
+Burning tokens: Anyone should be able to burn tokens, that they own, that are no longer needed.
+*/
 
-import 'https://github.com/hashgraph/hedera-smart-contracts/blob/v0.2.0/contracts/hts-precompile/HederaResponseCodes.sol';
-import 'https://github.com/hashgraph/hedera-smart-contracts/blob/v0.2.0/contracts/hts-precompile/IHederaTokenService.sol';
-import 'https://github.com/hashgraph/hedera-smart-contracts/blob/v0.2.0/contracts/hts-precompile/HederaTokenService.sol';
-import 'https://github.com/hashgraph/hedera-smart-contracts/blob/v0.2.0/contracts/hts-precompile/ExpiryHelper.sol';
 
-contract NFTCreator is ExpiryHelper {
-  function createNft(
-      string memory name, 
-      string memory symbol, 
-      string memory memo, 
-      int64 maxSupply,  
-      uint32 autoRenewPeriod
-    ) external payable returns (address){
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.18;
 
-    IHederaTokenService.TokenKey[] memory keys = new IHederaTokenService.TokenKey[](1);
-    // Set this contract as supply
-    keys[0] = getSingleKey(KeyType.SUPPLY, KeyValueType.CONTRACT_ID, address(this));
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-    IHederaTokenService.HederaToken memory token;
-    token.name = name;
-    token.symbol = symbol;
-    token.memo = memo;
-    token.treasury = address(this);
-    token.tokenSupplyType = true; // set supply to FINITE
-    token.maxSupply = maxSupply;
-    token.tokenKeys = keys;
-    token.freezeDefault = false;
-    token.expiry = createAutoRenewExpiry(address(this), autoRenewPeriod); // Contract automatically renews by itself
+contract DegenToken is ERC20, ERC20Burnable, Ownable {
+    struct Item {
+        string name;
+        uint256 price;
+    }
+    // creates a mapping to store information about different items, where each item is identified by a unique ID
+    mapping(uint256 => Item) public items;
+    // creates a mapping to track which items have been redeemed by which users
+    mapping(address => mapping(uint256 => bool)) public redeemedItems;
+    // We are declaring a event here which is the way to log and record specific actions within the contract
+    event ItemRedeemed(address indexed player, uint256 itemId);
 
-    (int responseCode, address createdToken) = HederaTokenService.createNonFungibleToken(token);
-    if(responseCode != HederaResponseCodes.SUCCESS){revert("Failed to create non-fungible token");}
-    return createdToken;
-  }
+    // Here we are declared a constructor and mapping the items to the respective item id's 
+    constructor() ERC20("DegenToken", "DGN") {
+        // Add some example items
+        items[1] = Item("Book", 10);
+        items[2] = Item("Bottle", 20);
+        items[3] = Item("Mobile", 50);
+    }
+    // Function used to mint tokens 
+    function mint(address to, uint256 amount) external onlyOwner {
+        _mint(to, amount);
+    }
+    // Function used to transfer the tokens and it also checks the enter value should be greater than zero 
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        require(amount > 0, "Amount should be greater than 0");
+        _transfer(_msgSender(), to, amount);
+        return true;
+    }
+    // Function used to redeem the prizes 
+    function redeem(uint256 itemId) external {
+        require(itemId > 0, "Invalid item ID.");
+        require(redeemedItems[_msgSender()][itemId] == false, "Item already redeemed.");
 
-  function mintNft(address token, bytes[] memory metadata) external returns(int64){
-    (int response, , int64[] memory serial) = HederaTokenService.mintToken(token, 0, metadata);
-    if(response != HederaResponseCodes.SUCCESS) {revert("Failed to mint non-fungible token");}
-    return serial[0];
-  }
+        Item storage item = items[itemId];
+        require(item.price > 0, "Item not found.");
 
-  function transferNft(address token, address receiver, int64 serial) external returns(int){
-    int response = HederaTokenService.transferNFT(token, address(this), receiver, serial);
-    if(response != HederaResponseCodes.SUCCESS){revert("Failed to transfer non-fungible token");}
-    return response;
-  }
+        uint256 itemPrice = item.price;
+        require(balanceOf(_msgSender()) >= itemPrice, "Insufficient balance.");
+
+        // Transfer tokens from the sender to the contract
+        _transfer(_msgSender(), address(this), itemPrice);
+
+        // Mark the item as redeemed
+        redeemedItems[_msgSender()][itemId] = true;
+
+        emit ItemRedeemed(_msgSender(), itemId);
+    }
+    // returns the balance of tokens held by the specified address
+    function getBalance(address account) public view returns (uint256) {
+        return balanceOf(account);
+    }
+    // This function allows destroying the required amount of tokens owned by the caller
+     function burn(address _address, uint256 value) public {
+    if (balanceOf(_address) >= value) {
+        _burn(_address, value);
+    }
+}
 }
